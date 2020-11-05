@@ -210,6 +210,20 @@ for env in ${conda_envs[@]}; do
   CONDA_ENVS_PATH=$old_conda_dir/envs/ conda env export --name "$env" > "$yml"
 done
 
+# Store a backup of exported environments in an archive in users $HOME
+conda_backup_dir=$HOME/.conda_backups
+if [ ! -d "$conda_backup_dir" ]; then
+  mkdir -p $conda_backup_dir
+  echo "Create anaconda env backup directory $conda_backup_dir"
+fi
+
+if [ ! -d "$conda_backup_dir" ]; then
+  echo "Failed to create new conda env backup dir $conda_backup_dir!" >&2
+  exit 3;
+else
+  today=$(date +"%Y-%m-%d")
+  tar -czf ${conda_backup_dir}/conda_envs_${today}.tar.gz .
+fi
 
 echo "-----------------------------------------------------------"
 echo "Step 4) import environments into new conda installation ($new_conda_dir)"
