@@ -23,7 +23,8 @@
 # Changelog: 
 #  * November 2020: Added options to fix prefix in botched conda installations,
 #                   renamed variables, added additional checks and warnings
-#                   throughout the script 
+#                   throughout the script.
+#                   Extended script for base environment in extra step.
 
 set -Eeuo pipefail 
 
@@ -194,6 +195,7 @@ echo "Step 3) export explicit package lists for all environments in old conda in
 echo "-----------------------------------------------------------"
 
 conda_envs=$(cd $old_conda_dir/envs && ls -d *)
+conda_envs+=("base")
 
 cd $tmp_dir
 move_dir=$tmp_dir/conda-move-envs
@@ -207,7 +209,7 @@ for env in ${conda_envs[@]}; do
   txt="$move_dir/$env.txt"
   
   CONDA_ENVS_PATH=$old_conda_dir/envs/ conda list --explicit --name "$env" > "$txt"
-  CONDA_ENVS_PATH=$old_conda_dir/envs/ conda env export --name "$env" > "$yml"
+  CONDA_ENVS_PATH=$old_conda_dir/envs/ conda env export --no-builds --name "$env" > "$yml"
 done
 
 # Store a backup of exported environments in an archive in users $HOME
@@ -222,7 +224,9 @@ if [ ! -d "$conda_backup_dir" ]; then
   exit 3;
 else
   today=$(date +"%Y-%m-%d")
+  conda_env_backup="${conda_backup_dir}/conda_envs_${today}.tar.gz"
   tar -czf ${conda_backup_dir}/conda_envs_${today}.tar.gz .
+
 fi
 
 echo "-----------------------------------------------------------"
@@ -238,27 +242,24 @@ for env in ${conda_envs[@]}; do
   yml="$move_dir/$env.yml"
   txt="$move_dir/$env.txt"
   
-  # First try to recreate the exact environment. If that fails, create an
-  # environment with the same packages but possibly newer packages.
-  if [ ! -d "$new_conda_dir/envs/$env" ]; then
-#    set -x
+  if [ $env == "base" ]; then
+    set -x
+    conda install --prefix "$new_conda_dir" --file "$txt" || \
+    conda env create --prefix "$new_conda_dir" --file "$yml" --force || \
+    echo "$env" >> "$failed_envs"
+    set +x
+  elif [ ! -d "$new_conda_dir/envs/$env" ]; then
+    # First try to recreate the exact environment. If that fails, create an
+    # environment with the same packages but possibly newer packages.
+    set -x
     conda create --prefix "$new_conda_dir/envs/$env" --file "$txt" || \
     conda env create --prefix "$new_conda_dir/envs/$env" --file "$yml" || \
     echo "$env" >> "$failed_envs"
-#    set +x
+    set +x
   fi
 done
 if (( $? != 0 )); then
   echo "Fatal error during conda migration. Aborting."
-fi
-
-if [ -s "$failed_envs" ]
-then
-  # Write the error messages to stderr so they don't accidentally get
-  # merged with any other output (in case stdout is redirected into a
-  # file).
-  echo "Failed envs:" >&2
-  cat "$failed_envs" >&2
 fi
 
 # Step 6. Change the path in the user bashrc / bash_profile
@@ -271,7 +272,15 @@ fi
 # Step 7. Cleanup
 if (( $? == 0 )); then
   echo "----------------------------------------------------------------------------------"
-  echo "Migration successful. Please execute 'source ~/.bashrc' to finalize the migration."
+  echo "Migration finished. Please execute 'source ~/.bashrc' to finalize the migration."
+  if [ -s "$failed_envs" ]
+  then
+    echo "Beware: There were environments that were not properly migrated."
+    echo "        You might need to restore them manually from backup"
+    echo "        (e.g. ${conda_env_backup})"
+    echo "Failed envs:"
+    cat "$failed_envs"
+  fi
   echo "Lastly, please test your new conda installation."
   echo "Only then you should remove the old one at: $old_conda_dir"
   echo "----------------------------------------------------------------------------------"
